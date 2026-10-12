@@ -1,0 +1,23 @@
+# Wait for claude-science to start
+# The first launch of the day is the slow one: the sandbox preflight, the
+# database migrations and the asset unpack all happen before the port opens
+echo "$(date): Waiting for claude-science to open port ${cs_port}..."
+
+if wait_until_port_used "${host}:${cs_port}" 300; then
+  echo "$(date): Discovered claude-science listening on port ${cs_port}!"
+else
+  echo "$(date): Timed out waiting for claude-science to open port ${cs_port}!"
+  clean_up 1
+fi
+
+# Wait for the login helper, which serves the Connect button
+echo "$(date): Waiting for the login helper to open port ${port}..."
+
+if wait_until_port_used "${host}:${port}" 30; then
+  echo "$(date): Discovered the login helper listening on port ${port}!"
+else
+  echo "$(date): Timed out waiting for the login helper to open port ${port}!"
+  clean_up 1
+fi
+
+sleep 2

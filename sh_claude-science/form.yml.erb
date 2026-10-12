@@ -1,0 +1,42 @@
+cluster: "sherlock"
+
+form:
+  - cs_data_dir
+  - cs_extra_args
+  - cs_sandbox
+<%- IO.foreach(File.expand_path(File.dirname(__FILE__))+"/../_common/form/form.yml") do |line| %>
+  <%= line %>
+<%- end -%>
+
+
+attributes:
+
+  cs_data_dir:
+    label: "Data directory (optional)"
+    help: |
+      <small>
+      Where Claude Science stores its state: conversations, credentials, logs and artifacts (the default is <code>~/.claude-science</code>).</br/>
+      Only one daemon can run per data directory, so to run a second session at the same time (or to keep a large history off your 15GB <code>$HOME</code>), point this at another directory, e.g. <code>$GROUP_HOME/claude-science</code>.
+      </small>
+
+  cs_extra_args:
+    label: "Extra claude-science arguments (optional)"
+    help: |
+      <small>
+      Additional flags to pass to <code>claude-science serve</code>, e.g. <code>--verbose</code>
+      </small>
+
+  cs_sandbox:
+    widget: "check_box"
+    label: "Enable the Claude Science sandbox"
+    value: "0"
+    help: |
+      <small>
+      By default the sandbox is <strong>off</strong>: code Claude writes runs with your own permissions, can read and write anything you can access on Sherlock, and can reach any network host, without asking first.<br/>
+      If your Claude organization manages Claude Science's network allowlist, Claude Science keeps the sandbox on regardless of this setting.<br/>
+      <strong>⚠️ Enabling it may break functionality.</strong> Sherlock's compute nodes run an older Linux kernel than the sandbox expects, so with it on, Python and R cells, environment setup and most of the bundled connectors can fail to start.
+      </small>
+
+<%- IO.foreach(File.expand_path(File.dirname(__FILE__))+"/../_common/form/attributes.yml") do |line| %>
+  <%= line %>
+<%- end -%>

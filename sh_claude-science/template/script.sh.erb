@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+
+<%- cs_sandbox = (context.cs_sandbox == "1") -%>
+# load modules
+# bwrap is loaded even with the sandbox off: if the user's Claude organization
+# manages the network allowlist, claude-science ignores --dangerously-no-sandbox
+# and starts the sandbox anyway, and won't start at all without bwrap and socat
+module reset
+module load system bubblewrap
+<%- unless context.sh_modules.blank? -%>
+module load <%= context.sh_modules %>
+<%- end -%>
+
+# execute custom pre-exec commands
+<%- unless context.sh_preexec.blank? -%>
+<%= context.sh_preexec %>
+<%- end -%>
+
+# development install locations: both claude-science and the socat it uses to
+# bridge the sandbox's network namespace still live in userspace
+export PATH="$HOME/.local/bin:$HOME/socat/bin:$PATH"
+
+for _cmd in claude-science socat bwrap; do
+    if ! command -v "$_cmd" > /dev/null; then
+        echo "$(date): $_cmd not found in PATH, can't start Claude Science" >&2
+        exit 1
+    fi
+done
+
+# report the build in the session log, and flag one older than the release the
+# app was tested against (update with 'claude-science update' outside the job:
+# the daemon runs with --no-auto-update, so it never updates itself)
+_cs_tested="0.1.60"
+_cs_version=$(claude-science --version 2> /dev/null | awk '{print $2}')
+echo "$(date): using claude-science ${_cs_version:-unknown} from $(command -v claude-science)"
+if [[ "$(printf '%s\n' "$_cs_tested" "$_cs_version" | sort -V | head -n 1)" != "$_cs_tested" ]]; then
+    echo "$(date): warning: claude-science ${_cs_version:-unknown} is older than ${_cs_tested}, the version this app was tested with" >&2
+fi
+
+# keep sandbox probes and kernel scratch files on the node-local SSD
+export TMPDIR="${L_SCRATCH_JOB:-${TMPDIR:-/tmp}}"
+
+# only let kernels and math libraries use the cores Slurm allocated
+export OPERON_CPU_COUNT="${SLURM_CPUS_ON_NODE:-1}"
+
+# remember where the app was staged, before changing workspace
+_staged_root="$PWD"
+
+# use an alternate data directory, if one was requested
+_data_dir_args=()
+<%- unless context.cs_data_dir.blank? -%>
+mkdir -p "<%= context.cs_data_dir %>"
+_data_dir_args=(--data-dir "<%= context.cs_data_dir %>")
+<%- end -%>
+
+# sandbox setup, done whether or not the sandbox was requested: an organization
+# that manages the network allowlist can force it on (see "load modules")
+
+# create server configuration
+# The Linux sandbox masks most of $HOME, so anything claude-science needs to
+# re-exec inside it has to be granted back explicitly, or Claude's tools fail
+# with "not found". Drop this once claude-science and socat live on a system
+# path (or come from a module).
+CONFIG_FILE="$_staged_root/config.toml"
+(
+umask 077
+cat > "$CONFIG_FILE" << EOL
+[sandbox]
+user_read_paths = [ "$(dirname "$(command -v claude-science)")", "$(dirname "$(command -v socat)")" ]
+EOL
+)
+_sandbox_args=(--config "$CONFIG_FILE")
+
+# provide memfd_create(), which glibc 2.17 lacks (see lib/memfd-shim.c)
+# Without it every sandboxed command is refused with "memfd_create is
+# unavailable". It isn't enough on its own: sandboxed commands then fail
+# claude-science's mount check, which needs the statx syscall (Linux 4.11+)
+if cc -O2 -shared -fPIC -o "$_staged_root/lib/libc.so" "$_staged_root/lib/memfd-shim.c"; then
+    export LD_LIBRARY_PATH="$_staged_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+else
+    echo "$(date): warning: couldn't build the memfd_create shim, sandboxed commands will fail" >&2
+fi
+
+<%- if cs_sandbox -%>
+echo "$(date): the Claude Science sandbox was requested (it may not work on this node's kernel)"
+<%- else -%>
+# sandbox off (the default)
+# Sherlock's kernel and glibc are too old for the claude-science sandbox: with
+# it on, the conda environments, Python/R cells and bundled connectors fail to
+# start. Without it, code Claude writes runs with the user's own permissions and
+# network access, and no folder or network approval cards are shown
+echo "$(date): the Claude Science sandbox is OFF: Claude's code runs with your own permissions and network access"
+echo "$(date): (unless your Claude organization manages the network allowlist, in which case claude-science keeps it on)"
+_sandbox_args+=(--dangerously-no-sandbox)
+<%- end -%>
+
+# start the login helper in the background
+# claude-science only authenticates through single-use login links that expire
+# after a few minutes, so the OnDemand session card can't hold a working URL:
+# the helper mints a fresh one every time the Connect button is clicked
+export CS_LOGIN_TOKEN="$password"
+"$_staged_root/bin/cs-login.py" \
+    --port "${port}" \
+    --redirect-base "/rnode/${host}/${cs_port}" \
+    "${_data_dir_args[@]}" &
+_login_pid=$!
+trap 'kill "$_login_pid" 2> /dev/null' EXIT
+
+# change workspace
+cd <%= context.sh_workspace.blank? ? "$HOME" : context.sh_workspace %>
+
+# start server
+# The daemon serves its routes at / and links to them relatively, so it goes
+# behind /rnode (which strips the prefix), not /node. --base-path doesn't move
+# the routes: it scopes the login cookie and the injected <base href> to the
+# proxied URL, which is what makes those relative links resolve.
+# The two --allow-origin flags clear the daemon's two separate gates: the portal
+# origin for the CSRF check on browser writes and websocket upgrades, and the
+# node itself because Apache proxies with Host: <node>:<port>, which the daemon
+# otherwise only accepts as localhost.
+claude-science serve \
+    "${_sandbox_args[@]}" \
+    --host "0.0.0.0" \
+    --port "${cs_port}" \
+    --sandbox-port "${cs_sandbox_port}" \
+    --base-path "/rnode/${host}/${cs_port}" \
+    --allow-origin "${ood_origin}" \
+    --allow-origin "https://${host}:${cs_port}" \
+    --no-browser \
+    --no-auto-update \
+    "${_data_dir_args[@]}" <%= context.cs_extra_args %>

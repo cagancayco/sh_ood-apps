@@ -33,5 +33,12 @@ based on https://github.com/OSC/bc_osc_codeserver
 OnDemand app for Matlab, using
 [matlab-proxy](https://github.com/mathworks/matlab-proxy)
 
+## `sh_claude-science`
 
+OnDemand app for [Claude Science](https://claude.com/docs/claude-science)
 
+Claude Science only signs browsers in with short-lived, single-use login links,
+so this app adds a small login helper that mints a fresh link each time the
+session is opened from the portal. See `sh_claude-science/README.md` for
+details, including why the Claude Science sandbox is off by default on
+Sherlock.

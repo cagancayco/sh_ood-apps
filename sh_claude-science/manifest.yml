@@ -1,0 +1,10 @@
+---
+name: Claude Science
+category: Interactive Apps
+subcategory: Apps
+role: batch_connect
+description: |
+  This app will launch a [Claude Science] server on [Sherlock].
+
+  [Claude Science]: https://claude.com/docs/claude-science
+  [Sherlock]: https://www.sherlock.stanford.edu/

@@ -1,0 +1,31 @@
+# Export the module function if it exists
+[[ $(type -t module) == "function" ]] && export -f module
+
+# Find available port for the login helper
+# This is the port OnDemand connects to: the "Connect to Claude Science" button
+# hits the helper, which hands out a fresh login link (see bin/cs-login.py)
+export port=$(find_port "$host")
+
+# Find available ports for the claude-science daemon and for the separate origin
+# it serves Claude-generated HTML previews from
+# Both are picked at random rather than left at their defaults (8000 and 8001),
+# so that several users can run the app on the same node
+export cs_port=$(find_port "$host")
+export cs_sandbox_port=$(find_port "$host")
+
+# find_port picks at random and can't see the picks made around it, so make sure
+# the three ports came out distinct
+while [[ "$cs_port" == "$port" ]]; do
+  export cs_port=$(find_port "$host")
+done
+while [[ "$cs_sandbox_port" == "$port" || "$cs_sandbox_port" == "$cs_port" ]]; do
+  export cs_sandbox_port=$(find_port "$host")
+done
+
+# Create password for authentication
+# The login helper only mints login links for requests that carry it
+export password=$(create_passwd 32)
+
+# Origin the browser presents to the daemon, for its CSRF gate: everything
+# reaches claude-science through the OnDemand reverse proxy, never directly
+export ood_origin="https://ondemand.sherlock.stanford.edu"
